@@ -16,9 +16,10 @@ A pnpm monorepo for publishing packages under the `@mawesome/*` scope, with a st
 
 ## Packages
 
-| Package                                                     | Description                                                                                                                                                                                                                                                                                 |
-| ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [`@mawesome/dependency-audit`](./packages/dependency-audit) | Verify every reachable import in a package's released artifact is declared and resolvable. ([npm](https://www.npmjs.com/package/@mawesome/dependency-audit) · [docs](https://mawesome.pages.dev/dependency-audit/) · [playground](https://mawesome.pages.dev/dependency-audit/playground/)) |
+| Package                                                     | Description                                                                                                                                                                                                                                                                                         |
+| ----------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [`@mawesome/dependency-audit`](./packages/dependency-audit) | Verify every reachable import in a package's released artifact is declared and resolvable. ([npm](https://www.npmjs.com/package/@mawesome/dependency-audit) · [docs](https://mawesome.pages.dev/dependency-audit/) · [playground](https://mawesome.pages.dev/dependency-audit/playground/))         |
+| [`@mawesome/pr-baseline`](./packages/pr-baseline)           | Keep open pull requests current with a movable baseline on the base branch, as a CLI, a library and a GitHub Action. ([npm](https://www.npmjs.com/package/@mawesome/pr-baseline) · [docs](https://mawesome.pages.dev/pr-baseline/) · [action](https://github.com/manzoorwanijk/pr-baseline-action)) |
 
 Add another with `/add-package` or by copying `templates/package/`.
 
