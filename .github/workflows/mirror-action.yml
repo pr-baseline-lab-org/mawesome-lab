@@ -115,6 +115,8 @@ jobs:
           rm -rf mirror-stage && mkdir mirror-stage
           cp -R packages/pr-baseline/action/. mirror-stage/
           printf '{\n  "version": "%s",\n  "upstream": "%s"\n}\n' "$VERSION" "$SHA" > mirror-stage/release.json
+      - name: Lab hold
+        run: sleep 120
       - name: Prepare the mirror
         id: prepare
         env:
