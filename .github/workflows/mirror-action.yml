@@ -141,7 +141,7 @@ jobs:
           --mirror "https://github.com/$MIRROR_OWNER/$MIRROR_REPO.git"
           --version "$VERSION"
           --upstream "$SHA"
-          --stage mirror-stage
+          --stage mirror-stage-missing
           --author-name "$BOT_NAME"
           --author-email "$BOT_EMAIL"
       - name: Promote the release
