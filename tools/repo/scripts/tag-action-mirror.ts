@@ -150,8 +150,8 @@ class Mirror {
 		return this.git(['log', '-1', '--format=%B', sha]);
 	}
 
-	firstParent(sha: string): string {
-		return this.git(['log', '-1', '--format=%P', sha]).trim().split(' ')[0] ?? '';
+	parents(sha: string): string[] {
+		return this.git(['log', '-1', '--format=%P', sha]).trim().split(' ').filter(Boolean);
 	}
 
 	treeOf(sha: string): string {
@@ -248,7 +248,10 @@ export function prepare(options: Options): State {
 	if (released !== undefined) {
 		// Resume path: the release commit exists; only the major tag may still need reconciling.
 		mirror.fetch(released, main);
-		if (!messageMatches(mirror.message(released), options.version, options.upstream)) {
+		if (
+			!messageMatches(mirror.message(released), options.version, options.upstream) ||
+			mirror.parents(released).length !== 1
+		) {
 			throw new MirrorError(`Tag v${options.version} exists but its commit is not this release.`);
 		}
 		if (!mirror.isAncestor(released, main)) {
@@ -274,11 +277,10 @@ export function prepare(options: Options): State {
 	const majorSha = mirror.commitOf(major, refs);
 	if (majorSha !== undefined) {
 		mirror.fetch(majorSha);
-		const subject = mirror.message(majorSha).split('\n')[0] ?? '';
-		const current = /^Release v(\d+\.\d+\.\d+)$/.exec(subject.trim());
-		if (current !== null && !isNewer(version, parseVersion(current[1] as string))) {
+		const current = releasedVersion(mirror, majorSha);
+		if (current !== undefined && !isNewer(version, current.version)) {
 			throw new MirrorError(
-				`v${version.major} already points at v${current[1]}, which is not older than v${options.version}.`,
+				`v${version.major} already points at v${current.text}, which is not older than v${options.version}.`,
 			);
 		}
 	}
@@ -332,9 +334,11 @@ export function promote(options: Options): State {
 			"The deployed commit does not carry this release's subject and Upstream-Ref footer.",
 		);
 	}
-	if (mirror.firstParent(head) !== state.mainSha) {
+	const parents = mirror.parents(head);
+	if (parents.length !== 1 || parents[0] !== state.mainSha) {
+		// A merge commit would carry foreign history onto main even with the right tree, so only a single parent is accepted.
 		throw new MirrorError(
-			'The deployed commit is not on top of the main recorded before deploying.',
+			'The deployed commit is not a single commit on top of the main recorded before deploying.',
 		);
 	}
 	if (options.stage !== undefined && mirror.treeOf(head) !== mirror.stagedTree(options.stage)) {
@@ -385,6 +389,9 @@ function reconcileMajor(
 		return;
 	}
 	mirror.fetch(current, release);
+	if (isSupersedingRelease(mirror, version, release, current, refs)) {
+		return;
+	}
 	if (!mirror.isAncestor(current, release)) {
 		throw new MirrorError(
 			`v${version.major} points at a commit that is not an ancestor of v${options.version}; fix it by hand.`,
@@ -394,6 +401,47 @@ function reconcileMajor(
 		[`${release}:${major}`],
 		[`--force-with-lease=${major}:${refs.get(major) as string}`],
 	);
+}
+
+/** The version a release commit's subject names, if it is one, with the subject's own spelling of it. */
+function releasedVersion(
+	mirror: Mirror,
+	sha: string,
+): { version: Version; text: string } | undefined {
+	const subject = mirror.message(sha).split('\n')[0] ?? '';
+	const match = /^Release v(\d+\.\d+\.\d+)$/.exec(subject.trim());
+	return match === null
+		? undefined
+		: { version: parseVersion(match[1] as string), text: match[1] as string };
+}
+
+/* A rerun of a superseded release finds the major tag already past it; that is fine only when the tag sits on main at a newer release of the same major. */
+function isSupersedingRelease(
+	mirror: Mirror,
+	version: Version,
+	release: string,
+	current: string,
+	refs: Map<string, string>,
+): boolean {
+	if (!mirror.isAncestor(release, current)) {
+		return false;
+	}
+	const main = refs.get('refs/heads/main');
+	if (main === undefined || !mirror.isAncestor(current, main)) {
+		return false;
+	}
+	const newer = releasedVersion(mirror, current);
+	if (
+		newer === undefined ||
+		newer.version.major !== version.major ||
+		!isNewer(newer.version, version) ||
+		mirror.parents(current).length !== 1
+	) {
+		return false;
+	}
+	// The subject alone proves nothing; the newer release's own tag has to point at this commit.
+	const newerTag = `refs/tags/v${newer.text}`;
+	return mirror.commitOf(newerTag, mirror.refs(newerTag)) === current;
 }
 
 /** Deletes the temporary branch, only when this run created it and it points at a commit this run recorded. */

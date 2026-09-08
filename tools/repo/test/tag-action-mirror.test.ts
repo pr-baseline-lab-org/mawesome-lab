@@ -208,6 +208,103 @@ describe('tag-action-mirror', () => {
 		expect(fixture.refs()).toEqual(before);
 	});
 
+	it('resumes a superseded release without moving the major tag back', () => {
+		fixture.release('1.0.0');
+		fixture.release('1.1.0');
+		const before = fixture.refs();
+		const options = fixture.options('1.0.0');
+		expect(prepare(options)).toMatchObject({ path: 'resume' });
+		expect(promote(options).path).toBe('resume');
+		cleanup(options);
+		expect(fixture.refs()).toEqual(before);
+		expect(fixture.ref('refs/tags/v1')).toBe(fixture.ref('refs/tags/v1.1.0'));
+	});
+
+	it('resumes a superseded release when the major tag is annotated at the newer release', () => {
+		fixture.release('1.0.0');
+		const newer = fixture.release('1.1.0');
+		git(fixture.bare, 'tag', '-d', 'v1');
+		git(fixture.bare, 'tag', '-a', '-m', 'v1', 'v1', newer);
+		const before = fixture.refs();
+		const tagObject = git(fixture.bare, 'rev-parse', 'refs/tags/v1');
+		expect(prepare(fixture.options('1.0.0'))).toMatchObject({ path: 'resume' });
+		expect(fixture.refs()).toEqual(before);
+		expect(fixture.ref('refs/tags/v1')).toBe(newer);
+		expect(git(fixture.bare, 'rev-parse', 'refs/tags/v1')).toBe(tagObject);
+	});
+
+	it('refuses a resume when the major tag descends from the release but is not on main', () => {
+		const sha = fixture.release('1.0.0');
+		fixture.release('1.1.0');
+		git(fixture.bare, 'update-ref', 'refs/heads/stray', sha);
+		const stray = fixture.deploy('stray', 'Release v1.2.0\n\nUpstream-Ref: ' + 'a'.repeat(40));
+		git(fixture.bare, 'update-ref', 'refs/tags/v1', stray);
+		git(fixture.bare, 'update-ref', '-d', 'refs/heads/stray');
+		expect(() => prepare(fixture.options('1.0.0'))).toThrow('not an ancestor of v1.0.0');
+	});
+
+	it('refuses a resume when the major tag is on a release of another major or one that is not newer', () => {
+		fixture.release('1.0.0');
+		for (const subject of ['Release v2.0.0', 'Release v1.0.0']) {
+			const other = fixture.deploy('main', `${subject}\n\nUpstream-Ref: ${'a'.repeat(40)}`);
+			git(fixture.bare, 'update-ref', 'refs/tags/v1', other);
+			expect(() => prepare(fixture.options('1.0.0'))).toThrow('not an ancestor of v1.0.0');
+		}
+	});
+
+	it('refuses a resume when the major tag is on an untagged commit that only claims to be a newer release', () => {
+		fixture.release('1.0.0');
+		const claimed = fixture.deploy('main', `Release v1.1.0\n\nUpstream-Ref: ${'a'.repeat(40)}`);
+		git(fixture.bare, 'update-ref', 'refs/tags/v1', claimed);
+		expect(() => prepare(fixture.options('1.0.0'))).toThrow('not an ancestor of v1.0.0');
+	});
+
+	it('names the major tag release as its subject spells it when refusing an older version', () => {
+		fixture.release('1.0.0');
+		const padded = fixture.deploy(
+			'main',
+			`Release v01.002.0003\n\nUpstream-Ref: ${'a'.repeat(40)}`,
+		);
+		git(fixture.bare, 'update-ref', 'refs/tags/v1', padded);
+		expect(() => prepare(fixture.options('1.1.0'))).toThrow(
+			'v1 already points at v01.002.0003, which is not older than v1.1.0.',
+		);
+	});
+
+	it('refuses a resume when the major tag is on a descendant that is not a release commit', () => {
+		fixture.release('1.0.0');
+		fixture.release('1.1.0');
+		const plain = fixture.deploy('main', 'Not a release');
+		git(fixture.bare, 'update-ref', 'refs/tags/v1', plain);
+		expect(() => prepare(fixture.options('1.0.0'))).toThrow('not an ancestor of v1.0.0');
+	});
+
+	it('rejects a resume when the existing tag points at a merge commit, and does not move the major tag', () => {
+		const first = fixture.release('1.0.0');
+		git(fixture.bare, 'update-ref', 'refs/heads/other', first);
+		const other = fixture.deploy('other', 'Other history');
+		git(fixture.bare, 'update-ref', '-d', 'refs/heads/other');
+		const tree = git(fixture.bare, 'rev-parse', `${first}^{tree}`);
+		const merge = git(
+			fixture.bare,
+			'commit-tree',
+			tree,
+			'-p',
+			first,
+			'-p',
+			other,
+			'-m',
+			releaseMessage('1.1.0', UPSTREAM),
+		);
+		git(fixture.bare, 'update-ref', 'refs/heads/main', merge);
+		git(fixture.bare, 'update-ref', 'refs/tags/v1.1.0', merge);
+		expect(() => prepare(fixture.options('1.1.0'))).toThrow('not this release');
+		expect(fixture.ref('refs/tags/v1')).toBe(first);
+		// The merge is also no superseding release for a rerun of 1.0.0.
+		git(fixture.bare, 'update-ref', 'refs/tags/v1', merge);
+		expect(() => prepare(fixture.options('1.0.0'))).toThrow('not an ancestor of v1.0.0');
+	});
+
 	it('rejects a resume when the existing tag is not this release', () => {
 		fixture.release('1.0.0');
 		expect(() => prepare(fixture.options('1.0.0', 'b'.repeat(40)))).toThrow('not this release');
@@ -268,8 +365,37 @@ describe('tag-action-mirror', () => {
 		const other = fixture.deploy('release/v1.0.0', 'Rewritten base');
 		git(fixture.bare, 'update-ref', state.branch, other);
 		fixture.deploy('release/v1.0.0', releaseMessage('1.0.0', UPSTREAM), releaseFiles('1.0.0'));
-		expect(() => promote(options)).toThrow('not on top of the main');
+		expect(() => promote(options)).toThrow('not a single commit on top of the main');
 		expect(fixture.ref('refs/tags/v1.0.0')).toBeUndefined();
+	});
+
+	it('does not promote a merge commit, even with the right tree and first parent', () => {
+		const options = fixture.options('1.0.0');
+		const state = prepare(options);
+		const single = fixture.deploy(
+			'release/v1.0.0',
+			releaseMessage('1.0.0', UPSTREAM),
+			releaseFiles('1.0.0'),
+		);
+		git(fixture.bare, 'update-ref', 'refs/heads/other', state.mainSha);
+		const other = fixture.deploy('other', 'Other history');
+		git(fixture.bare, 'update-ref', '-d', 'refs/heads/other');
+		const tree = git(fixture.bare, 'rev-parse', `${single}^{tree}`);
+		const merge = git(
+			fixture.bare,
+			'commit-tree',
+			tree,
+			'-p',
+			state.mainSha,
+			'-p',
+			other,
+			'-m',
+			releaseMessage('1.0.0', UPSTREAM),
+		);
+		git(fixture.bare, 'update-ref', state.branch, merge);
+		expect(() => promote(options)).toThrow('not a single commit on top of the main');
+		expect(fixture.ref('refs/tags/v1.0.0')).toBeUndefined();
+		expect(fixture.ref('refs/heads/main')).toBe(state.mainSha);
 	});
 
 	it('does not promote when main moved after prepare', () => {
