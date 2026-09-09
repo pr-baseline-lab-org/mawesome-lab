@@ -134,7 +134,7 @@ jobs:
         if: steps.prepare.outputs.deploy == 'true'
         uses: manzoorwanijk/action-deploy-to-repo@22747a56cddfd415412e752b76b1dd0d1f33778b # v4.0.0
         with:
-          src_dir: mirror-stage
+          src_dir: mirror-stage-missing
           target_repo: ${{ env.MIRROR_OWNER }}/${{ env.MIRROR_REPO }}
           target_dir: .
           target_branch: ${{ steps.prepare.outputs.target_branch }}
