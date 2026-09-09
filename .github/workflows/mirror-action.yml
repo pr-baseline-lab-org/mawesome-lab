@@ -22,8 +22,8 @@ concurrency:
 permissions: {}
 
 env:
-  MIRROR_OWNER: manzoorwanijk
-  MIRROR_REPO: pr-baseline-action
+  MIRROR_OWNER: pr-baseline-lab-org
+  MIRROR_REPO: pr-baseline-action-lab
 
 jobs:
   mirror:
